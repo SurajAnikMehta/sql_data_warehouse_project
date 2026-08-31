@@ -1,0 +1,10 @@
+use master;
+
+create database datawarehouse;
+use datawarehouse;
+
+create schema bronze;
+
+CREATE SCHEMA sliver;
+
+CREATE SCHEMA gold;
