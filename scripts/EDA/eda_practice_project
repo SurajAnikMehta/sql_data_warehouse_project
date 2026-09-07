@@ -1,0 +1,269 @@
+
+--Understanding table structures, column definitions, and schemas before querying.
+
+--Explore the metadata to see all user tables in the database.
+SELECT 
+    TABLE_CATALOG,
+    TABLE_SCHEMA,
+    TABLE_NAME,
+    TABLE_TYPE
+FROM INFORMATION_SCHEMA.TABLES;
+
+-- Explor all columns in the database
+SELECT 
+    TABLE_NAME,
+    COLUMN_NAME,
+    DATA_TYPE,
+    IS_NULLABLE
+FROM INFORMATION_SCHEMA.COLUMNS
+where TABLE_NAME = 'dim_customer'
+
+select * from gold.dim_products  group by product_id having COUNT(*) >1 
+
+-- Explore all unique countries where customers are based.
+Select distinct country from gold.dim_customer order by 1
+
+-- Explore all categories, subcategories, and distinct product lines available.
+Select distinct category, subcategory, product_name
+from gold.dim_products order by 1, 2, 3
+
+-- Identifying operational boundaries, time horizons, and date spans.
+Select 
+    min (order_date) as first_order, 
+    max (order_date) as last_order_date,
+    datediff(YEAR, min(order_date), max(ship_date)) as order_range_years,
+    datediff(MONTH, min(order_date), max(ship_date)) as order_range_months
+from gold.fact_sales
+
+-- Find the oldest and youngest customers based on birthdate.
+select 
+datediff(year,min(birthdate),GETDATE()) as oldest_cust,
+datediff(year,max(birthdate),GETDATE()) as youngest_cust
+from gold.dim_customer
+
+--Find total sales, total items sold, average selling price, total orders placed, and distinct products sold.
+Select 
+    sum (sales_amount) as total_sales, 
+    sum (quantity) as total_item_sold, 
+    avg (price) as Average_price, 
+    count (distinct order_num) as total_orders, 
+from gold.fact_sales s
+left join gold.dim_products p
+on s.product_key = p.product_key
+
+
+
+
+
+--Phase 1: Database Exploration
+--Task 1: Query the database system metadata to display all available table catalogs, schemas, 
+--        table names, and table types present in the database.
+
+Select name, create_date from sys.databases -- show databases names
+
+SELECT * FROM INFORMATION_SCHEMA.COLUMNS
+
+--Task 2: Inspect the metadata for the dim_customers table to display its column names, data types, 
+--        and nullability constraints.
+
+SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+where TABLE_NAME = 'dim_customer'
+
+SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+where TABLE_NAME = 'dim_products'
+
+SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+where TABLE_NAME = 'fact_sales'
+
+--Phase 2: Dimensions Exploration
+--Task 3: Retrieve a sorted, distinct list of all customer countries from the customer dimension table.
+select distinct country from gold.dim_customer
+order by 1
+
+--Task 4: Retrieve a unique breakdown of product categories, subcategories, and 
+--        product names sorted by category hierarchy.
+select distinct category, subcategory, product_name from gold.dim_products
+order by 1,2,3
+
+--Phase 3: Date & Temporal Scope
+--Task 5: Find the earliest and latest order_date in the sales table, along with the total timespan 
+--        of the business operations expressed in both years and months.
+
+select MIN(order_date) as earliest_order,
+max(order_date) as lastes_order,
+datediff(year, min(order_date), max(order_date)) as years,
+datediff(month, min(order_date), max(order_date)) as months
+from gold.fact_sales
+
+--Task 6: Calculate the earliest and latest customer birthdates from the customer table, name
+--        alongside their derived ages (in years) relative to the current date.
+
+SELECT first_name,last_name,country,birthdate,
+datediff(year,birthdate, getdate()) as age,
+CASE 
+    WHEN birthdate = (select min(birthdate) from gold.dim_customer) then 'Oldest'
+    WHEN birthdate = (select max(birthdate) from gold.dim_customer) then 'Youngest'
+End as customer_type
+FROM gold.dim_customer
+WHERE birthdate = (select MIN(birthdate) from gold.dim_customer)  OR
+     birthdate = (select Max(birthdate) from gold.dim_customer) 
+select * from
+(SELECT top 1 first_name,last_name,country,birthdate,
+datediff(year,birthdate, getdate()) as age,
+'Oldest' as customer_type
+from gold.dim_customer 
+where birthdate is not null order by birthdate asc) as oldest
+
+union all
+select * from
+(SELECT top 1 first_name,last_name,country,birthdate,
+datediff(year,birthdate, getdate()) as age,
+'Youngest' as customer_type
+from gold.dim_customer 
+where birthdate is not null order by birthdate desc) as youngest
+
+WITH OldestCustomer AS (
+    SELECT TOP 1
+        first_name,
+        last_name,
+        birthdate,
+        DATEDIFF(year, birthdate, GETDATE()) AS age,
+        'Oldest' AS customer_type
+    FROM gold.dim_customer
+    WHERE birthdate IS NOT NULL
+    ORDER BY birthdate ASC
+),
+YoungestCustomer AS (
+    SELECT TOP 1
+        first_name,
+        last_name,
+        birthdate,
+        DATEDIFF(year, birthdate, GETDATE()) AS age,
+        'Youngest' AS customer_type
+    FROM gold.dim_customer
+    WHERE birthdate IS NOT NULL
+    ORDER BY birthdate DESC
+)
+SELECT * FROM OldestCustomer
+UNION ALL
+SELECT * FROM YoungestCustomer;
+
+--Phase 4: Measures Exploration
+--Task 7: Calculate the global summary metrics from the sales table in a single query:Total revenue 
+--          (sales_amount)Total quantity sold (quantity)Average unit price (price)Total 
+--          unique orders placed (order_number)Total unique products sold (product_key)
+
+select Format(SUM(sales_amount) / 1e6,'0.00M') as Total_revenue,
+       Format(SUM(quantity)/ 1e3,'0.00k') as Total_quantity_sold,
+       AVG(price) as Avg_unit_price, 
+       Format(count(distinct order_num)/1e3,'0.00k') as Total_unique_orders,
+       count(distinct product_key) as Total_unique_products_sold
+from gold.fact_sales
+
+--Phase 5: Magnitude Analysis (Dimensions $\times$ Measures)
+--Task 1: Total customers by countries, by gender, total products by category, Avg cost in each category,
+Select country, count(distinct customer_id) as total_customers
+from gold.dim_customer group by country order by 2 desc
+ 
+Select gender, count(distinct customer_id) as total_customers
+from gold.dim_customer group by gender order by 2 desc
+
+Select category, count(distinct product_name) as total_products 
+from gold.dim_products group by category order by 2 desc
+
+Select category, avg(cost) as avg_cost
+from gold.dim_products group by category order by 2 desc
+
+--Task 2: total revenue generated for each category, total revenue generated for each customer,
+Select p.category, SUM(s.sales_amount) as total_revenue
+from gold.fact_sales s left join gold.dim_products p on p.product_key = s.product_key
+group by p.category order by 2 desc
+
+Select c.customer_id, c.first_name + ' ' + c.last_name as full_name,
+SUM(s.sales_amount) as total_revenue
+from gold.fact_sales s left join gold.dim_customer c on s.customer_key = c.customer_key
+group by c.customer_id,c.first_name, c.last_name order by 3 desc
+
+--  what is the distribution of sold item across countries
+
+Select c.country, sum(s.quantity) 
+from gold.dim_customer c left join gold.fact_sales s 
+on c.customer_key = s.customer_key group by country order by 2 desc
+
+--Task 8: Group and rank all countries by total revenue generated, also displaying the count of distinct customers 
+--          in each country. Sort by total revenue in descending order.
+
+select RANK() over(order by sum(s.sales_amount) desc) as revenue_rank,
+       c.country, format(sum(s.sales_amount)/1e6,'0.00M' )as total_revenue,
+       count(distinct c.customer_id) as total_customer
+from gold.fact_sales s
+left join gold.dim_customer c
+on c.customer_key = s.customer_key
+group by c.country
+
+--Task 9: Calculate the total sales revenue and total quantity sold across each product category. 
+--          Sort from highest revenue to lowest.
+select p.category, sum(s.sales_amount) as total_revenue,
+       SUM(s.quantity) as total_quantity_sold
+from gold.fact_sales s left join gold.dim_products p
+on s.product_key = p.product_key
+group by p.category order by 2 desc
+
+--Phase 6: Ranking & Pareto Analysis
+--Task 1: Find the top 5 highest-grossing products by total sales revenue using simple aggregation 
+--          and limiting syntax (TOP).
+
+Select top 5
+       p.product_name as product_nm,
+       Sum(s.sales_amount) as total_sales
+from gold.fact_sales s left join gold.dim_products p
+on s.product_key = p.product_key
+group by p.product_name order by 2 desc
+
+ -- Find the top 5 worest performing products by total sales revenue
+
+ select top 5
+        p.product_name, sum(s.sales_amount) as total_revenue
+ From gold.fact_sales s left join gold.dim_products p
+ on s.product_key = p.product_key
+ group by p.product_name order by 2 asc
+
+--Task 11: Re-query the top 5 highest-grossing products, but use an analytical window function (DENSE_RANK()) 
+--          inside a subquery or CTE to handle potential rank ties.
+
+select * from (
+SELECT DENSE_RANK() over(order by sum(s.sales_amount) desc) as rank_product,
+    p.product_name, sum(s.sales_amount) as total_revenue
+FROM gold.dim_products p inner join
+gold.fact_sales s on p.product_key = s.product_key
+group by p.product_name )t
+where rank_product <=5
+
+
+--Task 12: Identify the top 10 customers who have generated the highest lifetime sales revenue, 
+--          displaying their customer ID, full name, and total spend.
+
+Select top 10
+        c.customer_id,
+        c.first_name,
+        c.last_name,
+        Sum(s.sales_amount) as total_spending
+from gold.dim_customer c inner join gold.fact_sales s
+On c.customer_key = s.customer_key
+group by c.customer_id, c.first_name, c.last_name 
+order by 4 desc
+
+--Task 13: Identify the bottom 3 customers who have placed the fewest unique orders (minimum order count), 
+--          displaying their customer ID, full name, and total order count.
+
+select top 3
+    c.customer_id,
+    c.first_name,
+    c.last_name ,
+    count(distinct s.order_num) total_order
+from gold.dim_customer c inner join gold.fact_sales s
+on c.customer_key = s.customer_key
+group by c.customer_id, c.first_name, c.last_name
+order by total_order asc
+
+
